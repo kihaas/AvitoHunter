@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # AI
     openrouter_api_key: str
-    ai_model: str = "qwen/qwen2.5-vl-72b-instruct:free"
+    ai_model: str = "gemini-2.5-flash"
 
     # Поиск
     max_price: int = 12000

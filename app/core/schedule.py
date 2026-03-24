@@ -13,7 +13,7 @@ from aiogram import Bot
 from app.core.config import settings
 from app.database.db import is_seen, mark_seen
 from app.parser.avito import get_listings
-from app.parser.ai_filter import analyze
+from app.ai.analyzer import analyze
 from app.bot.handlers.notifications import send_listing
 
 logger = logging.getLogger("avito_hunter.scheduler")
@@ -28,7 +28,7 @@ async def run_check(bot: Bot) -> None:
     notified = 0
 
     for query in settings.search_queries:
-        listings = get_listings(query, max_price=settings.max_price)
+        listings = await get_listings(query, max_price=settings.max_price)
 
         for listing in listings:
             lid = listing["id"]
@@ -43,9 +43,7 @@ async def run_check(bot: Bot) -> None:
 
             # AI-анализ
             ai = analyze(
-                listing,
-                api_key=settings.openrouter_api_key,
-                model=settings.ai_model,
+                listing
             )
 
             # Сохраняем в БД (даже если AI не ответил)

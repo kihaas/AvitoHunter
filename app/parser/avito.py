@@ -1,139 +1,118 @@
-
-#Авито блокирует ботов -> случайный User-Agent + паузы между запросами.
-#Если блокировки участятся — переходим на Playwright (отдельная ветка).
-
-
+# app/parser/avito.py
+import asyncio
 import base64
 import logging
 import random
 from urllib.parse import quote
 
-import requests
-from bs4 import BeautifulSoup
+from playwright.async_api import Page
+
+from app.core.config import settings
+from app.parser.playwright_setup import get_browser_context, save_storage_state
 
 logger = logging.getLogger("avito_hunter.parser")
 
-_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
-] #это что и почему мозила
 
-
-def _headers() -> dict:
-    return {
-        "User-Agent": random.choice(_USER_AGENTS),
-        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
-
-
-def _build_url(query: str, max_price: int | None = None) -> str:
-    """Поиск по всей России, категория «Спорт и отдых»."""
+async def _build_url(query: str, max_price: int | None = None) -> str:
     url = f"https://www.avito.ru/rossiya?q={quote(query)}&cid=9"
     if max_price:
         url += f"&pmax={max_price}"
     return url
 
 
-def _fetch_html(url: str) -> str | None:
-    try:
-        r = requests.get(url, headers=_headers(), timeout=15)
-        if r.status_code == 200:
-            return r.text
-        logger.warning(f"Авито → HTTP {r.status_code}")
-        return None
-    except requests.RequestException as e:
-        logger.warning(f"Ошибка запроса Авито: {e}")
-        return None
+async def _parse_page(page: Page) -> list[dict]:
+    await page.wait_for_selector("[data-marker='item']", timeout=15000)
 
+    items = await page.query_selector_all("[data-marker='item']")
 
-def _parse_html(html: str) -> list[dict]:
-    soup = BeautifulSoup(html, "lxml")
-    items = soup.select("[data-marker='item']") or soup.select("article[class*='iva-item']")
     results = []
-
     for item in items:
         try:
-            lid = item.get("data-item-id", "")
+            lid = await item.get_attribute("data-item-id")
             if not lid:
                 continue
 
-            title_el = item.select_one("[data-marker='item-title']") or item.select_one("h3")
-            title = title_el.get_text(strip=True) if title_el else ""
+            title_el = await item.query_selector("[data-marker='item-title']")
+            title = await title_el.inner_text() if title_el else ""
 
-            price_el = item.select_one("[data-marker='item-price']")
-            price_raw = price_el.get_text(strip=True) if price_el else ""
+            price_el = await item.query_selector("[data-marker='item-price']")
+            price_raw = await price_el.inner_text() if price_el else "0"
             price = int("".join(c for c in price_raw if c.isdigit()) or "0")
 
-            link_el = item.select_one("a[data-marker='item-title']") or item.select_one("a[href]")
-            href = link_el.get("href", "") if link_el else ""
-            url = f"https://www.avito.ru{href}" if href.startswith("/") else href
+            link_el = await item.query_selector("a[data-marker='item-title']")
+            href = await link_el.get_attribute("href") if link_el else ""
+            url = f"https://www.avito.ru{href}" if href and href.startswith("/") else href
 
-            desc_el = item.select_one("[data-marker='item-description']")
-            description = desc_el.get_text(strip=True)[:600] if desc_el else ""
+            desc_el = await item.query_selector("[data-marker='item-description']")
+            description = (await desc_el.inner_text() if desc_el else "")[:600]
 
-            geo_el = item.select_one("[data-marker='item-address']")
-            location = geo_el.get_text(strip=True) if geo_el else ""
+            location_el = await item.query_selector("[data-marker='item-address']")
+            location = await location_el.inner_text() if location_el else ""
 
-            img_el = item.select_one("img[src]") or item.select_one("img[data-src]")
-            img_url = ""
-            if img_el:
-                img_url = img_el.get("src") or img_el.get("data-src") or ""
-                for small, big in [("140x105", "640x480"), ("208x156", "640x480"), ("80x60", "640x480")]:
-                    img_url = img_url.replace(small, big)
+            img_el = await item.query_selector("img")
+            img_url = await img_el.get_attribute("src") if img_el else ""
+            if img_url and "140x105" in img_url:
+                img_url = img_url.replace("140x105", "640x480")
 
-            has_delivery = bool(item.select_one("[data-marker='item-delivery']"))
+            has_delivery = bool(await item.query_selector("[data-marker='item-delivery']"))
 
             results.append({
                 "id": str(lid),
-                "title": title,
+                "title": title.strip(),
                 "price": price,
                 "url": url,
-                "description": description,
-                "location": location,
+                "description": description.strip(),
+                "location": location.strip(),
                 "img_url": img_url,
                 "img_b64": None,
                 "has_delivery": has_delivery,
             })
         except Exception as e:
-            logger.debug(f"Пропуск элемента: {e}")
+            logger.debug(f"Ошибка парсинга элемента: {e}")
 
     return results
 
 
-def _fetch_image_b64(img_url: str) -> str | None:
+async def _fetch_image_b64(page: Page, img_url: str) -> str | None:
     if not img_url:
         return None
     try:
-        r = requests.get(img_url, headers=_headers(), timeout=10)
-        if r.status_code == 200:
-            return base64.b64encode(r.content).decode()
+        response = await page.request.get(img_url)
+        if response.ok:
+            content = await response.body()
+            return base64.b64encode(content).decode()
     except Exception:
         pass
     return None
 
 
-def get_listings(query: str, max_price: int | None = None) -> list[dict]:
-    """Полный цикл: поиск -> парсинг -> скачивание фото."""
-    url = _build_url(query, max_price)
-    logger.info(f"Поиск: '{query}'")
+async def get_listings(query: str, max_price: int | None = None) -> list[dict]:
+    logger.info(f"Поиск на Авито: '{query}'")
 
-    html = _fetch_html(url)
-    if not html:
+    context = await get_browser_context(headless=True)
+    page = await context.new_page()
+
+    try:
+        url = await _build_url(query, max_price)
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        await asyncio.sleep(random.uniform(2, 4))  # человеческая пауза
+
+        listings = await _parse_page(page)
+
+        logger.info(f"  Найдено объявлений: {len(listings)}")
+
+        # Скачиваем фото
+        for listing in listings:
+            if listing["img_url"]:
+                listing["img_b64"] = await _fetch_image_b64(page, listing["img_url"])
+                await asyncio.sleep(0.5)
+
+        await save_storage_state(context)  # сохраняем cookies
+        return listings
+
+    except Exception as e:
+        logger.error(f"Ошибка при парсинге '{query}': {e}")
         return []
-
-    listings = _parse_html(html)
-    logger.info(f"  Найдено: {len(listings)}")
-
-    for listing in listings:
-        if listing["img_url"]:
-            listing["img_b64"] = _fetch_image_b64(listing["img_url"])
-
-    return listings
+    finally:
+        await context.close()
