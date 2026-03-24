@@ -3,9 +3,10 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from app.core.config import Settings
+from app.core.config import settings
 from app.core.logger import setup_logging
 from app.core.schedule import setup_scheduler
 from app.database.db import init_db
@@ -16,14 +17,21 @@ async def main() -> None:
     setup_logging()
     logger = logging.getLogger("avito_hunter")
 
-    await init_db(Settings.db_path)
+    # Инициализация базы
+    await init_db(settings.db_path)
 
-    bot = Bot(token=Settings.bot_token, parse_mode="HTML")
+    # Новый способ задания parse_mode в aiogram 3.7+
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
+
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Подключаем обработчики
+    # Подключаем роутеры
     dp.include_router(admin_router)
 
+    # Настраиваем планировщик
     scheduler = setup_scheduler(bot)
 
     logger.info("🚀 AvitoHunter успешно запущен")
@@ -32,8 +40,8 @@ async def main() -> None:
     try:
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
             drop_pending_updates=True,
+            allowed_updates=dp.resolve_used_update_types(),
         )
     finally:
         scheduler.shutdown()
