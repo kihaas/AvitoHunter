@@ -15,15 +15,15 @@ class Settings(BaseSettings):
 
     # AI — теперь Gemini
     gemini_api_key: str
-    ai_model: str = "gemini-2.5-flash"
+    ai_model: str = "gemini-3-flash-preview"
 
     # Поиск
     max_price: int = 12000
     check_interval_minutes: int = 30
 
     # Парсер
-    avito_delay_min: float = 3.0
-    avito_delay_max: float = 7.0
+    avito_delay_min: float = 4.0
+    avito_delay_max: float = 8.0
 
     # Система
     log_level: str = "INFO"

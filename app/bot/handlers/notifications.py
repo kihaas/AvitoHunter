@@ -1,5 +1,5 @@
 """
-handlers/notifications.py — отправка уведомлений об объявлениях в Telegram.
+handlers/notifications.py — форматирование и отправка уведомлений об объявлениях.
 """
 
 import logging
@@ -18,51 +18,43 @@ def _format(listing: dict, ai: dict) -> str:
     price = listing.get("price", 0)
     price_str = f"{price:,} ₽".replace(",", "\u202f") if price else "цена не указана"
 
-    # Подлинность
     fake = ai.get("is_fake_risk")
     conf = ai.get("fake_confidence", "")
+    conf_suffix = f" ({conf})" if conf and conf not in ("неизвестно", "") else ""
+
     if fake is True:
-        fake_str = "⚠️ риск подделки"
-        if conf and conf != "неизвестно":
-            fake_str += f" ({conf})"
+        fake_str = f"⚠️ риск подделки{conf_suffix}"
     elif fake is False:
-        fake_str = "✅ похоже на оригинал"
-        if conf and conf != "неизвестно":
-            fake_str += f" ({conf})"
+        fake_str = f"✅ похоже на оригинал{conf_suffix}"
     else:
         fake_str = "❓ не определить по фото"
 
-    # Состояние
     damage_map = {
-        "нет": "✅ нет",
-        "мелкие": "🟡 мелкие",
-        "серьёзные": "🔴 серьёзные",
+        "нет":        "✅ нет",
+        "мелкие":     "🟡 мелкие",
+        "серьёзные":  "🔴 серьёзные",
         "неизвестно": "❓ неизвестно",
     }
-    damage_str = damage_map.get(ai.get("damage", "неизвестно"), "❓")
-
-    # Доставка
+    damage_str   = damage_map.get(ai.get("damage", "неизвестно"), "❓")
     delivery_str = "✅ Авито.Доставка" if listing.get("has_delivery") else "❓ уточнить"
 
-    # Цена
     price_map = {
-        "отлично": "🟢 отличная",
-        "нормально": "🟡 нормальная",
-        "дорого": "🔴 дороговато",
-        "подозрительно дёшево": "⚠️ подозрительно дёшево",
+        "отлично":               "🟢 отличная",
+        "нормально":             "🟡 нормальная",
+        "дорого":                "🔴 дороговато",
+        "подозрительно дёшево":  "⚠️ подозрительно дёшево",
     }
     price_label = price_map.get(ai.get("price_verdict", ""), "")
-
-    reason = ai.get("reason", "")
-    location = listing.get("location", "")
+    reason      = ai.get("reason", "")
+    location    = listing.get("location", "")
 
     lines = [
         f"🏓 <b>{brand}</b> — {model}",
         f"💰 <b>{price_str}</b>" + (f"  {price_label}" if price_label else ""),
         "",
         f"Подлинность: {fake_str}",
-        f"Состояние: {damage_str}",
-        f"Доставка: {delivery_str}",
+        f"Состояние:   {damage_str}",
+        f"Доставка:    {delivery_str}",
     ]
     if location:
         lines.append(f"📍 {location}")
@@ -72,9 +64,13 @@ def _format(listing: dict, ai: dict) -> str:
     return "\n".join(lines)
 
 
-async def send_listing(bot: Bot, chat_id: int, listing: dict, ai: dict) -> None:
+async def send_listing(bot: Bot, chat_id: int, listing: dict, ai: dict) -> bool:
+    """
+    Отправляет уведомление об объявлении.
+    Возвращает True при успехе — scheduler использует это чтобы вызвать mark_notified().
+    """
     text = _format(listing, ai)
-    kb = listing_keyboard(listing["url"])
+    kb   = listing_keyboard(listing["url"])
 
     if listing.get("img_url"):
         try:
@@ -85,9 +81,9 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict, ai: dict) -> None:
                 reply_markup=kb,
                 parse_mode="HTML",
             )
-            return
+            return True
         except TelegramAPIError as e:
-            logger.debug(f"Фото не прошло: {e}")
+            logger.debug(f"Фото не прошло ({e}), шлю текстом")
 
     try:
         await bot.send_message(
@@ -97,12 +93,14 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict, ai: dict) -> None:
             parse_mode="HTML",
             disable_web_page_preview=False,
         )
+        return True
     except TelegramAPIError as e:
         logger.error(f"Ошибка отправки: {e}")
+        return False
 
 
 async def send_text(bot: Bot, chat_id: int, text: str) -> None:
     try:
         await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
     except TelegramAPIError as e:
-        logger.error(f"Ошибка служебного сообщения: {e}")
+        logger.error(f"Служебное сообщение не отправилось: {e}")

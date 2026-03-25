@@ -1,5 +1,10 @@
 """
-core/scheduler.py — планировщик и главный цикл поиска.
+app/core/schedule.py
+
+Ключевые изменения:
+  1. AI-вызов через asyncio.to_thread() — Gemini SDK синхронный, не блокируем event loop
+  2. mark_notified() вызывается ПОСЛЕ успешной отправки в TG, а не до
+  3. is_seen() проверяет до AI-анализа — экономим API-запросы
 """
 
 import asyncio
@@ -11,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot
 
 from app.core.config import settings
-from app.database.db import is_seen, mark_seen
+from app.database.db import is_seen, mark_seen, mark_notified
 from app.parser.avito import get_listings
 from app.ai.analyzer import analyze
 from app.bot.handlers.notifications import send_listing
@@ -20,12 +25,12 @@ logger = logging.getLogger("avito_hunter.scheduler")
 
 
 async def run_check(bot: Bot) -> None:
-    #Один полный прогон по всем поисковым запросам
-    now = datetime.now().strftime("%H:%M")
-    logger.info(f"[{now}] Начинаю проверку Авито...")
+    """Один полный прогон по всем поисковым запросам."""
+    start = datetime.now()
+    logger.info(f"[{start:%H:%M}] Начинаю проверку Авито...")
 
     seen_this_run: set[str] = set()
-    notified = 0
+    notified_count = 0
 
     for query in settings.search_queries:
         listings = await get_listings(query, max_price=settings.max_price)
@@ -33,44 +38,49 @@ async def run_check(bot: Bot) -> None:
         for listing in listings:
             lid = listing["id"]
 
-            # Дедупликация: внутри прогона + в БД
+            # Пропускаем дубли внутри одного прогона
             if lid in seen_this_run:
                 continue
             seen_this_run.add(lid)
 
+            # Пропускаем то, что уже видели раньше (есть в БД)
             if await is_seen(settings.db_path, lid):
                 continue
 
-            # AI-анализ
-            ai = analyze(
-                listing
-            )
+            # AI-анализ — синхронный вызов в отдельном потоке
+            ai = await asyncio.to_thread(analyze, listing)
 
-            # Сохраняем в БД (даже если AI не ответил)
+            # Сохраняем в БД сразу — даже если AI не ответил, чтобы не обрабатывать снова
             await mark_seen(settings.db_path, listing, ai)
 
             if ai is None:
                 logger.warning(f"  AI не ответил: {listing['title'][:50]}")
                 continue
 
-            # Не наш бренд — тихо пропускаем
             if not ai.get("is_relevant", True):
-                logger.info(f"  Не релевантно: {listing['title'][:50]}")
+                logger.info(f"  Не наш бренд: {listing['title'][:50]}")
                 continue
 
-            # Уведомляем обо всём релевантном (notify задаётся промптом)
-            if ai.get("notify", False):
-                await send_listing(bot, settings.admin_id, listing, ai)
-                notified += 1
+            if not ai.get("notify", False):
+                logger.info(f"  AI решил не уведомлять: {listing['title'][:50]}")
+                continue
 
-            await asyncio.sleep(2)  # пауза между AI-запросами
+            # Отправляем в Telegram
+            sent = await send_listing(bot, settings.admin_id, listing, ai)
 
-        # Пауза между поисковыми запросами к Авито
+            if sent:
+                # Помечаем как отправленное ТОЛЬКО после успешной отправки
+                await mark_notified(settings.db_path, lid)
+                notified_count += 1
+
+            await asyncio.sleep(2)
+
         delay = random.uniform(settings.avito_delay_min, settings.avito_delay_max)
         logger.info(f"  Пауза {delay:.1f}с...")
         await asyncio.sleep(delay)
 
-    logger.info(f"[{now}] Готово. Отправлено уведомлений: {notified}")
+    elapsed = (datetime.now() - start).seconds
+    logger.info(f"Проверка завершена за {elapsed}с. Отправлено: {notified_count}")
 
 
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:

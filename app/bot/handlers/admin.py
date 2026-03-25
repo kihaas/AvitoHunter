@@ -1,11 +1,17 @@
 """
-handlers/admin.py — команды и коллбэки для администратора бота.
+handlers/admin.py
+
+Фикс по сравнению с предыдущей версией:
+  - run_now callback теперь реально запускает проверку через asyncio.create_task()
+  - сразу отвечает "Запускаю..." чтобы кнопка не зависала
+  - импорт run_check сделан через lazy-import чтобы избежать циклических зависимостей
 """
 
+import asyncio
 import logging
 from datetime import datetime
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
@@ -15,7 +21,7 @@ from app.bot.keyboards.inline import admin_menu_keyboard
 logger = logging.getLogger("avito_hunter.bot")
 router = Router()
 
-# Фильтр — только от администратора
+
 def _is_admin(user_id: int) -> bool:
     return user_id == settings.admin_id
 
@@ -27,11 +33,11 @@ async def cmd_start(message: Message) -> None:
         return
 
     await message.answer(
-        "🏓 <b>AvitoHunter запущен</b>\n\n"
+        "🏓 <b>AvitoHunter</b>\n\n"
         f"Слежу за {len(settings.search_queries)} запросами.\n"
         f"Проверка каждые {settings.check_interval_minutes} мин.\n"
         f"Макс. цена: {settings.max_price:,} ₽\n\n"
-        "Буду присылать сюда всё найденное.",
+        "Всё найденное буду присылать сюда.",
         reply_markup=admin_menu_keyboard(),
         parse_mode="HTML",
     )
@@ -47,7 +53,7 @@ async def cb_status(callback: CallbackQuery) -> None:
     text = (
         f"<b>Статус</b> — {now}\n\n"
         f"Модель: <code>{settings.ai_model}</code>\n"
-        f"Запросов: {len(settings.search_queries)}\n"
+        f"Запросов в поиске: {len(settings.search_queries)}\n"
         f"Интервал: {settings.check_interval_minutes} мин\n"
         f"Макс. цена: {settings.max_price:,} ₽"
     )
@@ -55,15 +61,34 @@ async def cb_status(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data == "run_now")
+async def cb_run_now(callback: CallbackQuery, bot: Bot) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    # Отвечаем сразу — иначе кнопка будет крутиться до таймаута
+    await callback.answer("Запускаю проверку...")
+    await callback.message.edit_text(
+        "🔍 Запускаю внеплановую проверку Авито...\nРезультаты появятся здесь.",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+    # Ленивый импорт чтобы избежать циклической зависимости
+    from app.core.schedule import run_check
+    asyncio.create_task(run_check(bot))
+
+
 @router.callback_query(F.data == "help")
 async def cb_help(callback: CallbackQuery) -> None:
     text = (
         "<b>Как работает бот:</b>\n\n"
         "1. Каждые 30 мин парсит Авито по 8 запросам\n"
-        "2. AI смотрит текст + фото каждого объявления\n"
+        "2. Gemini смотрит текст + фото каждого объявления\n"
         "3. Если это Nox или Adidas — присылает сюда\n"
-        "4. Видел объявление раньше? Не дублирует\n\n"
-        "<b>Иконки в уведомлениях:</b>\n"
+        "4. Повторно одно объявление не придёт\n\n"
+        "<b>Иконки:</b>\n"
         "✅ — всё хорошо\n"
         "🟡 — стоит посмотреть\n"
         "⚠️ — риск подделки или подозрительная цена\n"

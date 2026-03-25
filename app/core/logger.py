@@ -5,17 +5,14 @@ from app.core.config import settings
 
 def setup_logging() -> None:
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     logging.basicConfig(
         level=level,
-        format=fmt,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-    # Тишина от сторонних библиотек
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
-    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    for noisy in ("httpx", "aiohttp", "apscheduler", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 logger = logging.getLogger("avito_hunter")

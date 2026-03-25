@@ -1,3 +1,7 @@
+import base64
+
+from pydantic import types
+
 SYSTEM_PROMPT = """
 Ты — эксперт по ракеткам для паделя с многолетним опытом. Ты умеешь отличать
 оригиналы от подделок по фотографиям и тексту объявлений. Твоя задача —
@@ -25,6 +29,7 @@ SYSTEM_PROMPT = """
 - Nox ML10 Quantum 3K (by Miguel Lamperti) — круглая форма, карбон 3K, контроль
 - Nox X-One Silhouette 2025 — округлая, для начинающих и любителей
 - Nox AR10 Luxury — овальная, карбон, продвинутый уровень
+это неполный список, любая ракетка с логотипом NOX нас интересует.
 - Другие модели Nox тоже интересны — главное оригинал
 
 Линейки Nox:
@@ -194,29 +199,30 @@ Adidas (оригинал):
 
 def build_user_message(listing: dict) -> list:
     """
-    Собирает сообщение пользователя для API:
-    текстовое описание + опционально base64-фото.
+    Возвращает список google.genai.types.Part для передачи в generate_content.
+    Текст объявления + inline-изображение (если есть).
     """
-    price_str = f"{listing['price']:,} ₽".replace(",", " ") if listing.get("price") else "не указана"
+    price = listing.get("price", 0)
+    price_str = f"{price:,} ₽".replace(",", "\u00a0") if price else "не указана"
 
     text = (
         f"Объявление с Авито:\n\n"
         f"Заголовок: {listing.get('title', '—')}\n"
         f"Цена: {price_str}\n"
-        f"Описание: {listing.get('description', '—') or '(не указано)'}\n"
+        f"Описание: {listing.get('description') or '(не указано)'}\n"
         f"Авито.Доставка: {'да' if listing.get('has_delivery') else 'нет/неизвестно'}\n"
-        f"Город продавца: {listing.get('location', 'не указан')}\n"
+        f"Город: {listing.get('location') or 'не указан'}\n"
         f"Ссылка: {listing.get('url', '—')}"
     )
 
-    content = [{"type": "text", "text": text}]
+    parts = [types.Part.from_text(text=text)]
 
     if listing.get("img_b64"):
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{listing['img_b64']}"
-            }
-        })
+        parts.append(
+            types.Part.from_bytes(
+                data=base64.b64decode(listing["img_b64"]),
+                mime_type="image/jpeg",
+            )
+        )
 
-    return content
+    return parts

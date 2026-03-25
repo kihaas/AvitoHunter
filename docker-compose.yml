@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data   # БД и cookies живут вне контейнера
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_ID=${ADMIN_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-gemini-2.0-flash}
+      - MAX_PRICE=${MAX_PRICE:-12000}
+      - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DB_PATH=data/hunter.db

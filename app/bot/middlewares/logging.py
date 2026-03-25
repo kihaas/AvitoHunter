@@ -14,9 +14,7 @@ class LoggingMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        if isinstance(event, Message):
+        if isinstance(event, Message) and event.text:
             user = event.from_user
-            logger.info(
-                f"Message from {user.id} (@{user.username}): {event.text!r}"
-            )
+            logger.info(f"[{user.id}] @{user.username}: {event.text!r}")
         return await handler(event, data)
