@@ -32,7 +32,7 @@ async def main() -> None:
 
     logger.info("AvitoHunter запущен")
 
-    # Первая проверка сразу при старте
+    # Запускаем первую проверку сразу при старте, не ждём 30 минут
     asyncio.create_task(run_check(bot))
 
     try:

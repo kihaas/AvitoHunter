@@ -1,6 +1,6 @@
 import base64
 
-from pydantic import types
+from google.genai import types
 
 SYSTEM_PROMPT = """
 Ты — эксперт по ракеткам для паделя с многолетним опытом. Ты умеешь отличать
@@ -199,8 +199,8 @@ Adidas (оригинал):
 
 def build_user_message(listing: dict) -> list:
     """
-    Возвращает список google.genai.types.Part для передачи в generate_content.
-    Текст объявления + inline-изображение (если есть).
+    Возвращает список google.genai.types.Part.
+    Передаём: текст объявления + фото (если скачано).
     """
     price = listing.get("price", 0)
     price_str = f"{price:,} ₽".replace(",", "\u00a0") if price else "не указана"
@@ -210,6 +210,7 @@ def build_user_message(listing: dict) -> list:
         f"Заголовок: {listing.get('title', '—')}\n"
         f"Цена: {price_str}\n"
         f"Описание: {listing.get('description') or '(не указано)'}\n"
+        f"Характеристики: {listing.get('params') or '(не указаны)'}\n"
         f"Авито.Доставка: {'да' if listing.get('has_delivery') else 'нет/неизвестно'}\n"
         f"Город: {listing.get('location') or 'не указан'}\n"
         f"Ссылка: {listing.get('url', '—')}"

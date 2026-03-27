@@ -1,4 +1,3 @@
-# app/core/config.py
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,27 +8,23 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Telegram
     bot_token: str
     admin_id: int
 
-    # AI — теперь Gemini
     gemini_api_key: str
-    ai_model: str = "gemini-3-flash-preview"
+    # gemini-3-flash-preview не существует — правильное название: gemini-2.0-flash
+    ai_model: str = "gemini-2.0-flash"
+    #ai_model: str = "gemini-3-flash-preview"
 
-    # Поиск
     max_price: int = 12000
-    check_interval_minutes: int = 30
+    check_interval_minutes: int = 40
 
-    # Парсер
-    avito_delay_min: float = 4.0
-    avito_delay_max: float = 8.0
+    avito_delay_min: float = 15.0
+    avito_delay_max: float = 25.0
 
-    # Система
     log_level: str = "INFO"
     db_path: str = "data/hunter.db"
 
-    # Поисковые запросы
     search_queries: list[str] = [
         "ракетка nox padel",
         "ракетка nox падел",
@@ -42,5 +37,4 @@ class Settings(BaseSettings):
     ]
 
 
-# Создаём экземпляр
 settings = Settings()

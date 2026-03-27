@@ -1,10 +1,10 @@
 """
 handlers/admin.py
 
-Фикс по сравнению с предыдущей версией:
-  - run_now callback теперь реально запускает проверку через asyncio.create_task()
-  - сразу отвечает "Запускаю..." чтобы кнопка не зависала
-  - импорт run_check сделан через lazy-import чтобы избежать циклических зависимостей
+Фиксы:
+- cb_run_now: проверяем текущий текст сообщения перед edit_text
+  чтобы не получать TelegramBadRequest "message is not modified"
+- cb_status: добавлен try/except вокруг edit_text по той же причине
 """
 
 import asyncio
@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 
 from aiogram import Router, F, Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
@@ -24,6 +25,21 @@ router = Router()
 
 def _is_admin(user_id: int) -> bool:
     return user_id == settings.admin_id
+
+
+async def _safe_edit(callback: CallbackQuery, text: str) -> None:
+    """edit_text без падения если текст не изменился."""
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=admin_menu_keyboard(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            pass  # всё нормально, просто текст тот же
+        else:
+            raise
 
 
 @router.message(Command("start"))
@@ -57,7 +73,7 @@ async def cb_status(callback: CallbackQuery) -> None:
         f"Интервал: {settings.check_interval_minutes} мин\n"
         f"Макс. цена: {settings.max_price:,} ₽"
     )
-    await callback.message.edit_text(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await _safe_edit(callback, text)
     await callback.answer()
 
 
@@ -67,15 +83,14 @@ async def cb_run_now(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
-    # Отвечаем сразу — иначе кнопка будет крутиться до таймаута
-    await callback.answer("Запускаю проверку...")
-    await callback.message.edit_text(
-        "🔍 Запускаю внеплановую проверку Авито...\nРезультаты появятся здесь.",
-        reply_markup=admin_menu_keyboard(),
-        parse_mode="HTML",
+    # Отвечаем сразу — без этого кнопка крутится до таймаута (30с)
+    await callback.answer("Запускаю...")
+
+    await _safe_edit(
+        callback,
+        "🔍 <b>Запускаю проверку Авито...</b>\n\nРезультаты придут сюда.",
     )
 
-    # Ленивый импорт чтобы избежать циклической зависимости
     from app.core.schedule import run_check
     asyncio.create_task(run_check(bot))
 
@@ -94,5 +109,5 @@ async def cb_help(callback: CallbackQuery) -> None:
         "⚠️ — риск подделки или подозрительная цена\n"
         "❓ — не удалось определить по фото"
     )
-    await callback.message.edit_text(text, reply_markup=admin_menu_keyboard(), parse_mode="HTML")
+    await _safe_edit(callback, text)
     await callback.answer()

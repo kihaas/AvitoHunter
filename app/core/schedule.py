@@ -1,10 +1,14 @@
 """
-app/core/schedule.py
+app/core/scheduler.py  (был schedule.py — переименован, т.к. schedule — стандартная библиотека Python)
 
-Ключевые изменения:
-  1. AI-вызов через asyncio.to_thread() — Gemini SDK синхронный, не блокируем event loop
-  2. mark_notified() вызывается ПОСЛЕ успешной отправки в TG, а не до
-  3. is_seen() проверяет до AI-анализа — экономим API-запросы
+Порядок работы для каждого объявления:
+  1. Парсинг страницы → список объявлений
+  2. Дедупликация внутри прогона (seen_this_run)
+  3. Проверка в БД (is_seen) — пропускаем если уже обрабатывали
+  4. AI-анализ в отдельном потоке (asyncio.to_thread)
+  5. mark_seen — сохраняем в БД сразу (чтобы не прогонять через AI повторно)
+  6. Отправка в TG если notify=True
+  7. mark_notified — только после успешной отправки
 """
 
 import asyncio
@@ -25,7 +29,6 @@ logger = logging.getLogger("avito_hunter.scheduler")
 
 
 async def run_check(bot: Bot) -> None:
-    """Один полный прогон по всем поисковым запросам."""
     start = datetime.now()
     logger.info(f"[{start:%H:%M}] Начинаю проверку Авито...")
 
@@ -38,19 +41,14 @@ async def run_check(bot: Bot) -> None:
         for listing in listings:
             lid = listing["id"]
 
-            # Пропускаем дубли внутри одного прогона
             if lid in seen_this_run:
                 continue
             seen_this_run.add(lid)
 
-            # Пропускаем то, что уже видели раньше (есть в БД)
             if await is_seen(settings.db_path, lid):
                 continue
 
-            # AI-анализ — синхронный вызов в отдельном потоке
             ai = await asyncio.to_thread(analyze, listing)
-
-            # Сохраняем в БД сразу — даже если AI не ответил, чтобы не обрабатывать снова
             await mark_seen(settings.db_path, listing, ai)
 
             if ai is None:
@@ -62,14 +60,11 @@ async def run_check(bot: Bot) -> None:
                 continue
 
             if not ai.get("notify", False):
-                logger.info(f"  AI решил не уведомлять: {listing['title'][:50]}")
+                logger.info(f"  Пропущено AI: {listing['title'][:50]}")
                 continue
 
-            # Отправляем в Telegram
             sent = await send_listing(bot, settings.admin_id, listing, ai)
-
             if sent:
-                # Помечаем как отправленное ТОЛЬКО после успешной отправки
                 await mark_notified(settings.db_path, lid)
                 notified_count += 1
 
