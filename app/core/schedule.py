@@ -48,7 +48,8 @@ async def run_check(bot: Bot) -> None:
             if await is_seen(settings.db_path, lid):
                 continue
 
-            ai = await asyncio.to_thread(analyze, listing)
+            ai = await analyze(listing)
+
             await mark_seen(settings.db_path, listing, ai)
 
             if ai is None:

@@ -1,88 +1,124 @@
 """
-app/ai/analyzer.py
+app/ai/openrouter_analyzer.py
 
-Использует google-genai SDK (новый, не google-generativeai).
-response_mime_type="application/json" — Gemini гарантированно вернёт JSON.
+Использует OpenRouter + модель nvidia/nemotron-nano-12b-v2-vl:free
+Поддерживает vision (изображения).
 """
 
 import json
 import logging
+import base64
+from typing import Any
 
-from google import genai
-from google.genai import types
+import httpx
 
 from app.core.config import settings
-from app.core.prompts import SYSTEM_PROMPT, build_user_message
+from app.core.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger("avito_hunter.ai")
 
-# Клиент создаётся один раз при импорте модуля
-_client = genai.Client(api_key=settings.gemini_api_key)
-
-_GENERATION_CONFIG = types.GenerateContentConfig(
-    system_instruction=SYSTEM_PROMPT,
-    temperature=0.1,
-    max_output_tokens=800,
-    response_mime_type="application/json",
-    safety_settings=[
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold=types.HarmBlockThreshold.BLOCK_NONE,
-        ),
-    ],
-)
+_client = httpx.AsyncClient(timeout=70.0)
 
 
-def analyze(listing: dict) -> dict | None:
-    """
-    Синхронный вызов Gemini (блокирующий).
-    Вызывается из scheduler через asyncio.to_thread() чтобы не блокировать event loop.
-    """
-    parts = build_user_message(listing)
+async def analyze(listing: dict) -> dict | None:
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "HTTP-Referer": "https://github.com/AvitoHunter",
+        "X-Title": "AvitoHunter",
+        "Content-Type": "application/json",
+    }
+
+    user_content: list[dict[str, Any]] = [
+        {"type": "text", "text": _build_user_text(listing)}
+    ]
+
+    if listing.get("img_b64"):
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{listing['img_b64']}"}
+        })
+
+    payload = {
+        "model": settings.ai_model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_content}
+        ],
+        "temperature": 0.2,          # чуть повысили
+        "max_tokens": 1000,
+        # Убираем response_format — эта модель его плохо поддерживает
+        # "response_format": {"type": "json_object"},
+    }
 
     try:
-        response = _client.models.generate_content(
-            model=settings.ai_model,
-            contents=parts,
-            config=_GENERATION_CONFIG,
-        )
+        response = await _client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
 
-        raw = response.text.strip()
+        message = data["choices"][0]["message"]
+        raw = message.get("content")
 
-        # На случай если модель всё же добавила ```json
+        if not raw or not isinstance(raw, str):
+            logger.warning("Модель вернула пустой или не строковый content")
+            # Попробуем reasoning, если есть
+            if "reasoning" in message:
+                logger.info("Найден reasoning контент")
+                raw = message.get("reasoning")
+            if not raw or not isinstance(raw, str):
+                return None
+
+        raw = raw.strip()
+
+        # Убираем возможные markdown-обёртки
         if raw.startswith("```"):
-            raw = raw.split("```")[1].lstrip("json").strip()
+            raw = raw.split("```", 2)[1].lstrip("json").strip()
 
-        result: dict = json.loads(raw)
+        # Основная попытка распарсить JSON
+        try:
+            result: dict = json.loads(raw)
+        except json.JSONDecodeError:
+            # Если не JSON — пробуем найти JSON-блок внутри текста
+            logger.warning(f"Не чистый JSON. Пробуем извлечь:\n{raw[:600]}")
+            import re
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group(0))
+                except:
+                    return None
+            else:
+                return None
 
         logger.info(
-            f"  AI → brand={result.get('brand')} | "
+            f"AI → brand={result.get('brand')} | "
             f"fake={result.get('is_fake_risk')} | "
             f"damage={result.get('damage')} | "
             f"notify={result.get('notify')}"
         )
         return result
 
-    except json.JSONDecodeError as e:
-        raw_preview = locals().get("raw", "")[:400]
-        logger.warning(f"Gemini вернул не-JSON: {e}\nОтвет: {raw_preview}")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"OpenRouter HTTP {e.response.status_code}: {e.response.text[:400]}")
     except Exception as e:
-        msg = str(e)
-        if "429" in msg or "quota" in msg.lower():
-            logger.warning("Превышен лимит запросов Gemini — подожди 1–2 минуты.")
-        else:
-            logger.error(f"Ошибка Gemini: {type(e).__name__}: {e}")
+        logger.error(f"Ошибка при запросе к OpenRouter: {type(e).__name__}: {e}")
 
     return None
+
+
+def _build_user_text(listing: dict) -> str:
+    price = listing.get("price", 0)
+    price_str = f"{price:,} ₽".replace(",", "\u00a0") if price else "не указана"
+
+    return (
+        f"Объявление с Авито:\n\n"
+        f"Заголовок: {listing.get('title', '—')}\n"
+        f"Цена: {price_str}\n"
+        f"Описание: {listing.get('description') or '(не указано)'}\n"
+        f"Характеристики: {listing.get('params') or '(не указаны)'}\n"
+        f"Авито.Доставка: {'да' if listing.get('has_delivery') else 'нет/неизвестно'}\n"
+        f"Город: {listing.get('location') or 'не указан'}\n"
+        f"Ссылка: {listing.get('url', '—')}\n\n"
+        f"Проанализируй фото и текст. Ответь строго JSON по инструкции."
+    )

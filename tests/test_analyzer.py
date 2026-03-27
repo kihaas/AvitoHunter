@@ -5,9 +5,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.ai.analyzer import analyze
+# Импортируем новую версию анализатора
+from app.ai.analyzer import analyze   # ← важно!
 
-# Тестовое объявление (то самое, которое ты показал)
+# Тестовое объявление
 test_listing = {
     "id": "7953963032",
     "title": "Ракетка для падел тенниса",
@@ -18,29 +19,44 @@ test_listing = {
     "location": "Пересвет",
     "has_delivery": False,
     "img_url": "https://40.img.avito.st/image/1/1.qrLdL7a4BlvrhsRehRn4z--PBF1jjoRTq4sEWW2GDlFr.IEGvMwtcMfh8Ly0bj067y2wkqGMUitbGcHtLBYq1XWQ",
-    "img_b64": None,
+    "img_b64": None,   # будет загружено внутри анализатора
 }
 
-async def test_with_retry(max_attempts=3):
-    print("🚀 Тест анализатора с повторными попытками...\n")
+async def test_with_retry(max_attempts: int = 3):
+    print("🚀 Запуск теста анализатора OpenRouter (Nemotron Nano 12B VL)...\n")
 
     for attempt in range(1, max_attempts + 1):
         print(f"Попытка {attempt}/{max_attempts}...")
 
-        result = await asyncio.to_thread(analyze, test_listing)
+        start_time = time.time()
+        result = await analyze(test_listing)          # ← теперь async, без to_thread
+        elapsed = time.time() - start_time
 
         if result:
-            print("\n✅ Успешно! Результат от Gemini:")
+            print(f"\n✅ Успешно! (время: {elapsed:.1f} сек)\n")
+            print("Результат:")
             print(json.dumps(result, ensure_ascii=False, indent=2))
+
+            # Дополнительно выводим ключевые поля
+            print("\nКлючевые выводы:")
+            print(f"   Бренд:          {result.get('brand')}")
+            print(f"   Модель:         {result.get('model')}")
+            print(f"   Релевантно:     {result.get('is_relevant')}")
+            print(f"   Риск подделки:  {result.get('is_fake_risk')} ({result.get('fake_confidence')})")
+            print(f"   Повреждения:    {result.get('damage')}")
+            print(f"   Уведомлять:     {result.get('notify')}")
+            print(f"   Ценовой вердикт:{result.get('price_verdict')}")
             return
+
         else:
-            print("❌ AI вернул None")
+            print(f"❌ AI вернул None (попытка {attempt})")
             if attempt < max_attempts:
-                wait = 25 * attempt
-                print(f"⏳ Ждём {wait} секунд перед следующей попыткой...\n")
+                wait = 20 * attempt
+                print(f"⏳ Ждём {wait} секунд перед повтором...\n")
                 await asyncio.sleep(wait)
 
-    print("\n❌ Не удалось получить ответ от Gemini после всех попыток.")
+    print("\n❌ Не удалось получить валидный ответ после всех попыток.")
+
 
 if __name__ == "__main__":
     asyncio.run(test_with_retry())

@@ -11,10 +11,8 @@ class Settings(BaseSettings):
     bot_token: str
     admin_id: int
 
-    gemini_api_key: str
-    # gemini-3-flash-preview не существует — правильное название: gemini-2.0-flash
-    ai_model: str = "gemini-2.0-flash"
-    #ai_model: str = "gemini-3-flash-preview"
+    openrouter_api_key: str  # Новый ключ
+    ai_model: str = "openrouter/free"
 
     max_price: int = 12000
     check_interval_minutes: int = 40
@@ -26,14 +24,14 @@ class Settings(BaseSettings):
     db_path: str = "data/hunter.db"
 
     search_queries: list[str] = [
-        "ракетка nox padel",
-        "ракетка nox падел",
-        "nox padel",
-        "ракетка adidas padel",
-        "adidas padel",
+        # "ракетка nox padel",
+        # "ракетка nox падел",
+        # "nox padel",
+        # "ракетка adidas padel",
+        # "adidas padel",
         "ракетка для падел",
-        "padel ракетка",
-        "падел ракетка",
+        # "padel ракетка",
+        # "падел ракетка",
     ]
 
 
