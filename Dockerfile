@@ -1,25 +1,25 @@
 FROM python:3.12-slim
 
-# Системные зависимости для Playwright
-RUN apt-get update && apt-get install -y \
-    wget curl ca-certificates \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-    libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-    libasound2 libpango-1.0-0 libcairo2 \
-    --no-install-recommends && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
+# Установка системных зависимостей (для selenium, если используется)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium-driver \
+    chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копирование зависимостей
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Устанавливаем Chromium для Playwright
-RUN playwright install chromium --with-deps
-
+# Копирование кода
 COPY . .
 
-# Создаём папку для БД и cookies
-RUN mkdir -p data
+# Переменные окружения по умолчанию
+ENV TELEGRAM_BOT_TOKEN="" \
+    TELEGRAM_CHAT_ID="" \
+    CHECK_INTERVAL_SECONDS=60 \
+    AVITO_SEARCH_URLS="" \
+    LOG_LEVEL=INFO
 
 CMD ["python", "main.py"]

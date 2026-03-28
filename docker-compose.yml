@@ -1,15 +1,21 @@
+version: '3.8'
+
 services:
-  bot:
+  avitohunter:
     build: .
+    container_name: avitohunter
     restart: unless-stopped
-    volumes:
-      - ./data:/app/data   # БД и cookies живут вне контейнера
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - ADMIN_ID=${ADMIN_ID}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - AI_MODEL=${AI_MODEL:-gemini-2.0-flash}
-      - MAX_PRICE=${MAX_PRICE:-12000}
-      - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-30}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-60}
+      - AVITO_SEARCH_URLS=${AVITO_SEARCH_URLS}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - DB_PATH=data/hunter.db
+    volumes:
+      - ./data:/app/data  # для сохранения состояния/кэша
+    networks:
+      - avito_net
+
+networks:
+  avito_net:
+    driver: bridge
