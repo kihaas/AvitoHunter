@@ -1,14 +1,3 @@
-"""
-parser/avito.py
-
-
-Изменения:
-- Используем BrowserSession (контекстный менеджер) вместо ручного get/close
-- Добавлен парсинг характеристик товара (params) — передаём в AI
-- _check_for_block теперь проверяет наличие/отсутствие объявлений, а не заголовок
-"""
-
-
 import asyncio
 import base64
 import logging
@@ -32,7 +21,6 @@ _ITEM_SELECTORS = [
 ]
 
 
-# Авито показывает эти тексты когда блокирует или показывает капчу
 _BLOCK_TITLE_SIGNS = ["доступ ограничен", "captcha", "robot", "проблема с ip", "blocked"]
 
 
@@ -48,10 +36,6 @@ def _build_url(query: str, max_price: int | None = None) -> str:
 
 
 async def _is_blocked(page: Page) -> bool:
-   """
-   Проверяет блокировку по заголовку страницы.
-   НЕ проверяет по URL — редирект на капчу обычно сохраняет нормальный URL.
-   """
    try:
        title = (await page.title()).lower()
        return any(sign in title for sign in _BLOCK_TITLE_SIGNS)
@@ -62,7 +46,6 @@ async def _is_blocked(page: Page) -> bool:
 
 
 async def _find_items_selector(page: Page) -> str | None:
-   """Перебирает селекторы пока не найдёт рабочий. Таймаут 30с на каждый."""
    for selector in _ITEM_SELECTORS:
        try:
            await page.wait_for_selector(selector, timeout=30_000)
@@ -104,7 +87,6 @@ async def _parse_items(page: Page, selector: str) -> list[dict]:
            description = ((await desc_el.inner_text()).strip())[:600] if desc_el else ""
 
 
-           # Характеристики из карточки списка (если отображаются)
            params_els = await item.query_selector_all("[data-marker='item-specific-params'] li")
            params = ", ".join(
                [(await el.inner_text()).strip() for el in params_els]
@@ -170,12 +152,10 @@ async def _fetch_image_b64(page: Page, img_url: str) -> str | None:
 
 
 async def get_listings(query: str, max_price: int | None = None) -> list[dict]:
-   """Парсит страницу результатов Авито для одного запроса."""
    logger.info(f"Поиск: '{query}'")
    url = _build_url(query, max_price)
 
 
-   # BrowserSession сам закрывает браузер и вызывает playwright.stop()
    async with BrowserSession() as context:
        page = await context.new_page()
 

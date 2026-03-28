@@ -1,10 +1,3 @@
-"""
-app/ai/openrouter_analyzer.py
-
-Использует OpenRouter + модель nvidia/nemotron-nano-12b-v2-vl:free
-Поддерживает vision (изображения).
-"""
-
 import json
 import logging
 import base64
@@ -46,10 +39,8 @@ async def analyze(listing: dict) -> dict | None:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
         ],
-        "temperature": 0.2,          # чуть повысили
+        "temperature": 0.2,
         "max_tokens": 1000,
-        # Убираем response_format — эта модель его плохо поддерживает
-        # "response_format": {"type": "json_object"},
     }
 
     try:
@@ -71,15 +62,12 @@ async def analyze(listing: dict) -> dict | None:
 
         raw = raw.strip()
 
-        # Убираем возможные markdown-обёртки
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1].lstrip("json").strip()
 
-        # Основная попытка распарсить JSON
         try:
             result: dict = json.loads(raw)
         except json.JSONDecodeError:
-            # Если не JSON — пробуем найти JSON-блок внутри текста
             logger.warning(f"Не чистый JSON. Пробуем извлечь:\n{raw[:600]}")
             import re
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)

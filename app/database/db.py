@@ -1,4 +1,3 @@
-# app/database/db.py
 import aiosqlite
 from datetime import datetime
 from typing import Any
@@ -28,7 +27,6 @@ async def init_db(db_path: str) -> None:
 
 
 async def is_seen(db_path: str, listing_id: str) -> bool:
-    """Встречали ли это объявление раньше (по любому результату AI)."""
     async with aiosqlite.connect(db_path) as db:
         async with db.execute(
             "SELECT 1 FROM seen_listings WHERE id = ?", (listing_id,)
@@ -37,7 +35,6 @@ async def is_seen(db_path: str, listing_id: str) -> bool:
 
 
 async def is_notified(db_path: str, listing_id: str) -> bool:
-    """Отправляли ли уже это объявление в Telegram."""
     async with aiosqlite.connect(db_path) as db:
         async with db.execute(
                 "SELECT 1 FROM seen_listings WHERE id = ? AND notified = 1", (listing_id,)
@@ -46,7 +43,6 @@ async def is_notified(db_path: str, listing_id: str) -> bool:
 
 
 async def mark_seen(db_path: str, listing: dict, ai: dict | None) -> None:
-    """Сохраняем объявление сразу при встрече (до отправки в Telegram)."""
     brand = ai.get("brand") if ai else None
     model = ai.get("model") if ai else None
     fake_risk = ai.get("is_fake_risk") if ai else None
@@ -74,7 +70,6 @@ async def mark_seen(db_path: str, listing: dict, ai: dict | None) -> None:
 
 
 async def mark_notified(db_path: str, listing_id: str) -> None:
-    """Помечаем объявление как отправленное — вызывать ПОСЛЕ успешной отправки в TG."""
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             "UPDATE seen_listings SET notified = 1 WHERE id = ?", (listing_id,)

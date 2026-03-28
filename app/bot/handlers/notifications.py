@@ -1,7 +1,3 @@
-"""
-handlers/notifications.py — форматирование и отправка уведомлений об объявлениях.
-"""
-
 import logging
 
 from aiogram import Bot
@@ -65,10 +61,7 @@ def _format(listing: dict, ai: dict) -> str:
 
 
 async def send_listing(bot: Bot, chat_id: int, listing: dict, ai: dict) -> bool:
-    """
-    Отправляет уведомление об объявлении.
-    Возвращает True при успехе — scheduler использует это чтобы вызвать mark_notified().
-    """
+
     text = _format(listing, ai)
     kb   = listing_keyboard(listing["url"])
 

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     bot_token: str
     admin_id: int
 
-    openrouter_api_key: str  # Новый ключ
+    openrouter_api_key: str
     ai_model: str = "openrouter/free"
 
     max_price: int = 12000

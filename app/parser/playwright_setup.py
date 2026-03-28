@@ -1,11 +1,3 @@
-"""
-parser/playwright_setup.py
-
-Фикс: playwright.stop() вызывается явно после закрытия браузера.
-Без этого при остановке бота вылетает:
-  "Connection closed while reading from the driver"
-"""
-
 import subprocess
 import sys
 from pathlib import Path
@@ -39,15 +31,6 @@ def ensure_playwright_installed() -> None:
 
 
 class BrowserSession:
-    """
-    Контекстный менеджер для браузера.
-    Гарантирует вызов playwright.stop() даже при исключении.
-
-    Использование:
-        async with BrowserSession() as ctx:
-            page = await ctx.new_page()
-            ...
-    """
 
     def __init__(self):
         self._playwright: Playwright | None = None
@@ -89,7 +72,6 @@ class BrowserSession:
         return self._context
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        # Сохраняем cookies перед закрытием
         if self._context:
             try:
                 STORAGE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +85,6 @@ class BrowserSession:
             except Exception:
                 pass
 
-        # Останавливаем playwright — это убирает "Connection closed" при завершении
         if self._playwright:
             try:
                 await self._playwright.stop()

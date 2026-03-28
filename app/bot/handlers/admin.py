@@ -1,12 +1,3 @@
-"""
-handlers/admin.py
-
-Фиксы:
-- cb_run_now: проверяем текущий текст сообщения перед edit_text
-  чтобы не получать TelegramBadRequest "message is not modified"
-- cb_status: добавлен try/except вокруг edit_text по той же причине
-"""
-
 import asyncio
 import logging
 from datetime import datetime
@@ -28,7 +19,6 @@ def _is_admin(user_id: int) -> bool:
 
 
 async def _safe_edit(callback: CallbackQuery, text: str) -> None:
-    """edit_text без падения если текст не изменился."""
     try:
         await callback.message.edit_text(
             text,
@@ -37,7 +27,7 @@ async def _safe_edit(callback: CallbackQuery, text: str) -> None:
         )
     except TelegramBadRequest as e:
         if "message is not modified" in str(e):
-            pass  # всё нормально, просто текст тот же
+            pass
         else:
             raise
 
@@ -83,7 +73,6 @@ async def cb_run_now(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
-    # Отвечаем сразу — без этого кнопка крутится до таймаута (30с)
     await callback.answer("Запускаю...")
 
     await _safe_edit(
